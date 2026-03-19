@@ -1,18 +1,18 @@
 """
 AI Agent: Query-to-Visualization pipeline.
 
-Architecture — three-stage ReAct-style agent
+Architecture — three-stage agent
 =============================================
 1. **Plan** — LLM interprets the user's natural-language question, extracts
    structured API parameters, and decides which visualization type fits best.
 2. **Execute** — The planner's output drives deterministic code that calls the
    ClinicalTrials.gov API and aggregates the results.
-3. **Assemble** — A second LLM call receives the raw aggregated data and
+3. **Visualize** — A second LLM call receives the raw aggregated data and
    produces the final visualization spec with proper title, encoding, and
    optional deep citations.
 
 Why two LLM calls instead of one?
-* The first call turns fuzzy language into *constrained JSON* — we validate
+* The first call turns fuzzy language into *constrained JSON* — validating
   it with Pydantic before any API call, eliminating hallucinated field names.
 * Aggregation & counting happen in deterministic Python, so numbers are always
   correct (no LLM math).
@@ -58,8 +58,10 @@ from app.schemas import (
 
 logger = logging.getLogger(__name__)
 
+NOT_SPECIFIED = "Not specified"
 
-# ── Stage 1: Query Planning ──────────────────────────────────────────────
+
+#Stage 1: Query Planning
 
 class QueryPlan(BaseModel):
     """Structured output the planner LLM must produce."""
@@ -207,7 +209,7 @@ async def _plan_query(req: QueryRequest) -> QueryPlan:
     return QueryPlan.model_validate(parsed)
 
 
-# ── Stage 2: Deterministic data fetching + aggregation ───────────────────
+#Stage 2: Deterministic data fetching + aggregation
 
 def _year_from_date(date_str: str | None) -> int | None:
     if not date_str:
@@ -222,7 +224,7 @@ def _aggregate_count_by_phase(studies: list[dict]) -> tuple[list[dict], str]:
     counter: Counter[str] = Counter()
     citations_map: dict[str, list[Citation]] = defaultdict(list)
     for s in studies:
-        phases = extract_phases(s) or ["Not specified"]
+        phases = extract_phases(s) or [NOT_SPECIFIED]
         for p in phases:
             counter[p] += 1
             citations_map[p].append(
@@ -373,7 +375,7 @@ def _aggregate_enrollment_by_phase(studies: list[dict]) -> tuple[list[dict], str
         enrollment = extract_enrollment(s)
         if enrollment is None:
             continue
-        phases = extract_phases(s) or ["Not specified"]
+        phases = extract_phases(s) or [NOT_SPECIFIED]
         for p in phases:
             totals[p] += enrollment
             citations_map[p].append(
@@ -428,7 +430,7 @@ async def _aggregate_compare_drugs(
         counter: Counter[str] = Counter()
         citations_map: dict[str, list[Citation]] = defaultdict(list)
         for s in studies:
-            for p in extract_phases(s) or ["Not specified"]:
+            for p in extract_phases(s) or [NOT_SPECIFIED]:
                 counter[p] += 1
                 citations_map[p].append(
                     Citation(nct_id=extract_nct_id(s), excerpt=extract_brief_title(s))
@@ -538,7 +540,7 @@ AGGREGATORS = {
 
 # Network and comparison aggregators are handled separately (they may need extra API calls)
 
-# ── Stage 3: Build final visualization spec ──────────────────────────────
+#Stage 3: Build final visualization spec
 
 ENCODING_MAP: dict[str, dict] = {
     "count_by_phase": {"x": ("phase", "nominal"), "y": ("trial_count", "quantitative")},
@@ -590,7 +592,7 @@ def _resolve_viz_type(name: str) -> VisualizationType:
         return VisualizationType.BAR_CHART
 
 
-# ── Public entry point ───────────────────────────────────────────────────
+#Public entry point
 
 async def process_query(req: QueryRequest) -> QueryResponse:
     """Full pipeline: Plan → Execute → Assemble."""
