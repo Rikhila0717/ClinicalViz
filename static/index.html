@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClinicalTrials.gov Visualization Agent</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vis-network@9/standalone/umd/vis-network.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f0f2f5;
+      color: #1a1a2e;
+      min-height: 100vh;
+    }
+
+    header {
+      background: linear-gradient(135deg, #0f3460, #16213e);
+      color: #fff;
+      padding: 1.5rem 2rem;
+      text-align: center;
+    }
+    header h1 { font-size: 1.6rem; font-weight: 600; }
+    header p { opacity: 0.8; margin-top: 0.3rem; font-size: 0.9rem; }
+
+    .container { max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
+
+    .query-panel {
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      margin-bottom: 1.5rem;
+    }
+
+    .query-row { display: flex; gap: 0.75rem; margin-bottom: 0.75rem; }
+    .query-row.main { }
+    .query-row input, .query-row select {
+      flex: 1;
+      padding: 0.65rem 0.9rem;
+      border: 1.5px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      transition: border-color 0.2s;
+    }
+    .query-row input:focus, .query-row select:focus {
+      outline: none;
+      border-color: #0f3460;
+    }
+
+    .filters-toggle {
+      background: none;
+      border: none;
+      color: #0f3460;
+      cursor: pointer;
+      font-size: 0.85rem;
+      margin-bottom: 0.75rem;
+      text-decoration: underline;
+    }
+    .filters { display: none; }
+    .filters.open { display: block; }
+
+    .btn {
+      background: linear-gradient(135deg, #0f3460, #533483);
+      color: #fff;
+      border: none;
+      padding: 0.65rem 1.5rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: opacity 0.2s;
+      white-space: nowrap;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .presets {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+    .preset-btn {
+      background: #e8edf3;
+      border: 1px solid #c5cdd8;
+      border-radius: 6px;
+      padding: 0.35rem 0.7rem;
+      font-size: 0.78rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .preset-btn:hover { background: #d0d8e4; }
+
+    .result-panel {
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      display: none;
+    }
+    .result-panel.visible { display: block; }
+
+    .result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .result-header h2 { font-size: 1.15rem; }
+
+    .meta-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+      font-size: 0.82rem;
+      color: #555;
+    }
+    .meta-tag {
+      background: #eef1f6;
+      padding: 0.25rem 0.6rem;
+      border-radius: 4px;
+    }
+
+    .chart-wrapper { position: relative; width: 100%; max-height: 450px; }
+    .chart-wrapper canvas { width: 100% !important; }
+
+    #network-container {
+      width: 100%;
+      height: 420px;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      display: none;
+    }
+
+    .citations-section { margin-top: 1.25rem; }
+    .citations-section h3 {
+      font-size: 0.9rem;
+      margin-bottom: 0.5rem;
+      color: #333;
+    }
+    .citation-list {
+      max-height: 200px;
+      overflow-y: auto;
+      font-size: 0.8rem;
+      color: #555;
+    }
+    .citation-item {
+      padding: 0.35rem 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .citation-item code {
+      background: #eef1f6;
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+      font-size: 0.78rem;
+    }
+    .citation-item a {
+      color: #0f3460;
+      text-decoration: none;
+    }
+    .citation-item a:hover { text-decoration: underline; }
+
+    .spinner {
+      display: none;
+      text-align: center;
+      padding: 2rem;
+      color: #666;
+    }
+    .spinner.active { display: block; }
+
+    .error-msg {
+      display: none;
+      background: #fef2f2;
+      color: #991b1b;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      font-size: 0.85rem;
+    }
+    .error-msg.visible { display: block; }
+
+    .json-toggle {
+      background: none;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      padding: 0.3rem 0.7rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+    .json-panel {
+      display: none;
+      margin-top: 1rem;
+      background: #1e1e2e;
+      color: #a6e3a1;
+      padding: 1rem;
+      border-radius: 8px;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.78rem;
+      max-height: 300px;
+      overflow: auto;
+      white-space: pre-wrap;
+    }
+    .json-panel.visible { display: block; }
+
+    @media (max-width: 640px) {
+      .query-row { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>ClinicalTrials.gov Visualization Agent</h1>
+  <p>Ask a question about clinical trials — get a chart backed by real data</p>
+</header>
+
+<div class="container">
+  <div class="query-panel">
+    <div class="presets">
+      <button class="preset-btn" data-query="How are Diabetes trials distributed across phases?" data-condition="Diabetes">Diabetes by phase</button>
+      <button class="preset-btn" data-query="How has the number of trials for Pembrolizumab changed per year since 2015?" data-drug="Pembrolizumab" data-start="2015">Pembrolizumab trend</button>
+      <button class="preset-btn" data-query="Which countries have the most recruiting trials for Lung Cancer?" data-condition="Lung Cancer" data-status="RECRUITING">Lung Cancer geography</button>
+      <button class="preset-btn" data-query="Compare phases for trials involving Aspirin vs Ibuprofen">Aspirin vs Ibuprofen</button>
+      <button class="preset-btn" data-query="Show a network of sponsors and drugs for Breast Cancer trials" data-condition="Breast Cancer">Breast Cancer network</button>
+    </div>
+
+    <div class="query-row main">
+      <input type="text" id="query" placeholder="Ask a question about clinical trials..." />
+      <button class="btn" id="submit-btn" onclick="submitQuery()">Visualize</button>
+    </div>
+
+    <button class="filters-toggle" onclick="toggleFilters()">+ Optional filters</button>
+    <div class="filters" id="filters">
+      <div class="query-row">
+        <input type="text" id="drug_name" placeholder="Drug name" />
+        <input type="text" id="condition" placeholder="Condition / disease" />
+      </div>
+      <div class="query-row">
+        <input type="text" id="sponsor" placeholder="Sponsor" />
+        <input type="text" id="country" placeholder="Country" />
+      </div>
+      <div class="query-row">
+        <input type="number" id="start_year" placeholder="Start year" />
+        <input type="number" id="end_year" placeholder="End year" />
+        <input type="text" id="status" placeholder="Status (RECRUITING, COMPLETED...)" />
+      </div>
+    </div>
+  </div>
+
+  <div class="error-msg" id="error-msg"></div>
+  <div class="spinner" id="spinner">Analyzing clinical trials data...</div>
+
+  <div class="result-panel" id="result-panel">
+    <div class="result-header">
+      <h2 id="chart-title"></h2>
+      <button class="json-toggle" onclick="toggleJson()">{ } Raw JSON</button>
+    </div>
+    <div class="meta-bar" id="meta-bar"></div>
+    <div class="chart-wrapper">
+      <canvas id="chart-canvas"></canvas>
+    </div>
+    <div id="network-container"></div>
+    <div class="json-panel" id="json-panel"></div>
+    <div class="citations-section" id="citations-section">
+      <h3>Source Citations (deep links to ClinicalTrials.gov)</h3>
+      <div class="citation-list" id="citation-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentChart = null;
+let currentNetwork = null;
+
+function toggleFilters() {
+  document.getElementById('filters').classList.toggle('open');
+}
+function toggleJson() {
+  document.getElementById('json-panel').classList.toggle('visible');
+}
+
+// Preset buttons
+document.querySelectorAll('.preset-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.getElementById('query').value = btn.dataset.query || '';
+    document.getElementById('drug_name').value = btn.dataset.drug || '';
+    document.getElementById('condition').value = btn.dataset.condition || '';
+    document.getElementById('start_year').value = btn.dataset.start || '';
+    document.getElementById('end_year').value = '';
+    document.getElementById('status').value = btn.dataset.status || '';
+    document.getElementById('sponsor').value = '';
+    document.getElementById('country').value = '';
+    submitQuery();
+  });
+});
+
+// Enter key submits
+document.getElementById('query').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitQuery();
+});
+
+async function submitQuery() {
+  const q = document.getElementById('query').value.trim();
+  if (!q) return;
+
+  const body = { query: q };
+  const optFields = ['drug_name','condition','sponsor','country','status'];
+  optFields.forEach(f => {
+    const v = document.getElementById(f).value.trim();
+    if (v) body[f] = v;
+  });
+  ['start_year','end_year'].forEach(f => {
+    const v = parseInt(document.getElementById(f).value);
+    if (!isNaN(v)) body[f] = v;
+  });
+
+  document.getElementById('error-msg').classList.remove('visible');
+  document.getElementById('result-panel').classList.remove('visible');
+  document.getElementById('spinner').classList.add('active');
+  document.getElementById('submit-btn').disabled = true;
+
+  try {
+    const resp = await fetch('/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    renderResult(data);
+  } catch (err) {
+    const el = document.getElementById('error-msg');
+    el.textContent = err.message;
+    el.classList.add('visible');
+  } finally {
+    document.getElementById('spinner').classList.remove('active');
+    document.getElementById('submit-btn').disabled = false;
+  }
+}
+
+const PALETTE = [
+  '#0f3460','#533483','#e94560','#16213e','#0ea5e9',
+  '#10b981','#f59e0b','#8b5cf6','#ec4899','#14b8a6',
+  '#f97316','#6366f1','#84cc16','#ef4444','#06b6d4',
+];
+
+function renderResult(data) {
+  const { visualization: viz, meta } = data;
+
+  // Title
+  document.getElementById('chart-title').textContent = viz.title;
+
+  // Meta bar
+  const metaBar = document.getElementById('meta-bar');
+  metaBar.innerHTML = '';
+  if (meta.total_studies_analyzed)
+    metaBar.innerHTML += `<span class="meta-tag">${meta.total_studies_analyzed} studies analyzed</span>`;
+  if (meta.query_interpretation)
+    metaBar.innerHTML += `<span class="meta-tag">${meta.query_interpretation}</span>`;
+  Object.entries(meta.filters_applied || {}).forEach(([k, v]) => {
+    metaBar.innerHTML += `<span class="meta-tag">${k}: ${v}</span>`;
+  });
+
+  // JSON panel
+  document.getElementById('json-panel').textContent = JSON.stringify(data, null, 2);
+
+  // Destroy previous
+  if (currentChart) { currentChart.destroy(); currentChart = null; }
+  if (currentNetwork) { currentNetwork.destroy(); currentNetwork = null; }
+
+  const canvas = document.getElementById('chart-canvas');
+  const netContainer = document.getElementById('network-container');
+  canvas.style.display = 'none';
+  netContainer.style.display = 'none';
+
+  if (viz.type === 'network_graph') {
+    renderNetwork(viz, netContainer);
+  } else {
+    canvas.style.display = 'block';
+    renderChart(viz, canvas);
+  }
+
+  // Citations
+  renderCitations(viz.data);
+
+  document.getElementById('result-panel').classList.add('visible');
+}
+
+function renderChart(viz, canvas) {
+  const enc = viz.encoding;
+  const xField = enc.x?.field;
+  const yField = enc.y?.field;
+  const colorField = enc.color?.field;
+  const thetaField = enc.theta?.field;
+
+  // Determine Chart.js chart type
+  let chartType = 'bar';
+  if (viz.type === 'time_series') chartType = 'line';
+  else if (viz.type === 'scatter_plot') chartType = 'scatter';
+  else if (viz.type === 'pie_chart') chartType = 'pie';
+  else if (viz.type === 'histogram') chartType = 'bar';
+
+  // PIE chart
+  if (chartType === 'pie') {
+    const labels = viz.data.map(d => d.values[xField] || d.values[thetaField] || '');
+    const values = viz.data.map(d => d.values[yField] || d.values[Object.keys(d.values).find(k => typeof d.values[k] === 'number')] || 0);
+    currentChart = new Chart(canvas, {
+      type: 'pie',
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          backgroundColor: PALETTE.slice(0, labels.length),
+        }],
+      },
+      options: { responsive: true, plugins: { legend: { position: 'right' } } },
+    });
+    return;
+  }
+
+  // GROUPED BAR (color field present)
+  if (colorField && chartType === 'bar') {
+    const groups = {};
+    viz.data.forEach(d => {
+      const group = d.values[colorField];
+      if (!groups[group]) groups[group] = [];
+      groups[group].push(d);
+    });
+    const allLabels = [...new Set(viz.data.map(d => d.values[xField]))];
+    const datasets = Object.entries(groups).map(([group, items], i) => {
+      const map = {};
+      items.forEach(d => map[d.values[xField]] = d.values[yField]);
+      return {
+        label: group,
+        data: allLabels.map(l => map[l] || 0),
+        backgroundColor: PALETTE[i % PALETTE.length],
+      };
+    });
+    currentChart = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: allLabels, datasets },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: true } },
+        scales: { y: { beginAtZero: true } },
+      },
+    });
+    return;
+  }
+
+  // STANDARD bar / line / scatter
+  const labels = viz.data.map(d => String(d.values[xField]));
+  const values = viz.data.map(d => d.values[yField]);
+
+  const dataset = {
+    label: yField,
+    data: chartType === 'scatter'
+      ? viz.data.map(d => ({ x: d.values[xField], y: d.values[yField] }))
+      : values,
+    backgroundColor: chartType === 'line' ? 'rgba(15,52,96,0.1)' : PALETTE.slice(0, labels.length),
+    borderColor: chartType === 'line' ? '#0f3460' : undefined,
+    borderWidth: chartType === 'line' ? 2 : 0,
+    fill: chartType === 'line',
+    tension: 0.3,
+    pointRadius: chartType === 'line' ? 4 : undefined,
+  };
+
+  currentChart = new Chart(canvas, {
+    type: chartType,
+    data: { labels: chartType === 'scatter' ? undefined : labels, datasets: [dataset] },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: chartType === 'scatter' ? {} : {
+        y: { beginAtZero: true, title: { display: true, text: yField } },
+        x: { title: { display: true, text: xField } },
+      },
+    },
+  });
+}
+
+function renderNetwork(viz, container) {
+  container.style.display = 'block';
+
+  const nodeSet = new Set();
+  const edges = [];
+
+  const srcField = viz.encoding.source?.field;
+  const tgtField = viz.encoding.target?.field;
+  const weightField = viz.encoding.weight?.field;
+
+  viz.data.forEach((d, i) => {
+    const src = d.values[srcField];
+    const tgt = d.values[tgtField];
+    const w = d.values[weightField] || 1;
+    nodeSet.add(src);
+    nodeSet.add(tgt);
+    edges.push({ from: src, to: tgt, value: w, title: `${src} ↔ ${tgt} (${w})` });
+  });
+
+  const nodesArr = [...nodeSet];
+  const nodes = nodesArr.map((n, i) => ({
+    id: n,
+    label: n,
+    color: PALETTE[i % PALETTE.length],
+    font: { size: 11 },
+  }));
+
+  currentNetwork = new vis.Network(container, { nodes, edges }, {
+    physics: { barnesHut: { gravitationalConstant: -3000 } },
+    edges: { smooth: { type: 'continuous' }, scaling: { min: 1, max: 8 } },
+    nodes: { shape: 'dot', scaling: { min: 10, max: 30 } },
+  });
+}
+
+function renderCitations(dataPoints) {
+  const list = document.getElementById('citation-list');
+  list.innerHTML = '';
+  let count = 0;
+  dataPoints.forEach(dp => {
+    (dp.citations || []).forEach(c => {
+      if (count >= 20) return;
+      const div = document.createElement('div');
+      div.className = 'citation-item';
+      div.innerHTML = `<a href="https://clinicaltrials.gov/study/${c.nct_id}" target="_blank"><code>${c.nct_id}</code></a> — ${c.excerpt}`;
+      list.appendChild(div);
+      count++;
+    });
+  });
+}
+</script>
+</body>
+</html>
