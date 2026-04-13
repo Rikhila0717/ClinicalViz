@@ -200,7 +200,7 @@ This backend can easily be rendered using Vega-Lite, D3, Chart.js, or any charti
 
 | Decision | Rationale |
 |---|---|
-| **Two narrow LLM calls instead of one big one** | Instead of flooding one gigantic prompt through the LLM, the planner maps language → structured query (simple, low hallucination risk). Aggregation calculations are in Python (zero hallucination risk). This avoids the classic failure mode where an LLM can invent plausible-but-wrong counts. |
+| **A smaller LLM call instead of one big one** | Instead of flooding one gigantic prompt through the LLM, the planner maps language → structured query (simple, low hallucination risk). Aggregation calculations are in Python (zero hallucination risk). This avoids the classic failure mode where an LLM can invent plausible-but-wrong counts. |
 | **Constrained output (JSON mode + Pydantic validation)** | The LLM must produce valid JSON matching the `QueryPlan` schema. If it doesn't, Pydantic raises the error before any API call happens - a fail-fast mechanism. |
 | **Whitelisting possible aggregations** | The planner prompt lists every allowed aggregation value. The LLM picks from this list rather than inventing strategies. Unknown values fall back to `count_by_phase`. This ensures the LLM does not create new aggregation values which might result in unexpected outputs. |
 | **Thin API client, no ORM** | The CT.gov API returns deeply nested JSON. I used simple dict accessors with `.get()` — any missing field returns `""` or `[]`, never crashes. |
